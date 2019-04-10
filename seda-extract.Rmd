@@ -1,0 +1,167 @@
+---
+title: "Certified buildings BG Market - Extract-to-File"
+output: html_notebook
+---
+
+```{r setup}
+knitr::opts_chunk$set(warning = FALSE, message = FALSE)
+library(tidyverse)
+library(tidymodels)
+library(recipes)
+library(rvest)
+library(stringr)
+library(lubridate)
+library(revgeo)
+library(jsonlite)
+library(httr)
+library(kableExtra)
+library(FinCal)
+library(gridExtra)
+library(grid)
+```
+
+
+# Retreive certified buildings data from the Bulgarian Energy Efficiency Information System
+
+```{r message=FALSE, warning=FALSE}
+URL <- "https://seea.government.bg/documents/SG%20_Final_BG.html"
+
+buildings <-
+        read_html(URL)
+
+buildings.list <-
+        buildings %>%
+        html_nodes("script") %>% 
+        html_text() %>%
+        last %>%
+        str_extract_all("\\['.*\\]") %>%
+        purrr::pluck(1) %>%
+        as_tibble
+
+buildings.split <-  
+        buildings.list$value %>%
+        str_replace_all("\\[|\\]", "") %>%
+        str_split(",(?=(?:[^']*'[^']*')*[^']*$)")
+
+tbl.buildings <-
+        tibble(
+                Name = map_chr(buildings.split, 14),
+                Location = map_chr(buildings.split, 20),
+                PostalCode = as.integer(map_chr(buildings.split, 21)),
+                Addess = map_chr(buildings.split, 15),
+                InUseSince = as.integer(map_chr(buildings.split, 22)),
+                Rating = as_factor(map_chr(buildings.split, 1)),
+                Potential.Rating = as_factor(map_chr(buildings.split, 5)),
+                Area = as.double(map_chr(buildings.split, 6)),
+                Energy.Savings = as.double(map_chr(buildings.split, 18)),
+                CO2.Savings = as.double(map_chr(buildings.split, 19)),
+                BGN.Savings = as.double(map_chr(buildings.split, 11)),
+                Investment = as.double(map_chr(buildings.split, 12)),
+                Payback = as.double(map_chr(buildings.split, 13)),
+                Building.Type1 = as_factor(map_chr(buildings.split, 16)),
+                Building.Type2 = as_factor(map_chr(buildings.split, 7)),
+                Lat = as.double(map_chr(buildings.split, 2)),
+                Lng = as.double(map_chr(buildings.split, 3))
+        )
+
+tbl.buildings <- tbl.buildings %>%
+        mutate(
+                Name = str_replace_all(Name, "'", ""),
+                Location = str_replace_all(Location, "'", ""),
+                Addess = str_replace_all(Addess, "'", ""),
+                Rating = str_replace_all(Rating, "'", ""),
+                Potential.Rating = str_replace_all(Potential.Rating, "'", ""),
+                Building.Type1 = str_replace_all(Building.Type1, "'", "")
+        ) %>%
+        write_csv("data_v2\\buildings.csv")
+        
+
+read_csv("data_v2\\buildings.csv") %>% tail()
+
+```
+
+
+# Reverse geocode 
+
+```{r message=FALSE, warning=FALSE}
+
+tbl.buildings.bing <-
+        tbl.buildings %>%
+        map2_df(.x = as.list(.$Lng), 
+                .y = as.list(.$Lat), 
+                .f = revgeo, 
+                output = "frame", 
+                provider = "bing",
+                API = "...Your access code goes here..."
+        ) %>%
+        bind_cols(tbl.buildings
+        )
+
+write_csv(tbl.buildings.bing, "data_v2\\buildings-bing.csv")
+
+read_csv("data_v2\\buildings-bing.csv") %>% tail()
+```
+
+# Transform to SEDA db
+
+```{r}
+state.region <-
+        read_csv("data_v2\\state-region.csv") %>%
+        mutate(
+                region = as_factor(region),
+                state = as_factor(state)
+        )
+
+
+seda_db <- read_csv("data_v2\\buildings-bing.csv") %>%
+        mutate(
+                city = as_factor(city),
+                state = as_factor(state),
+                Building.Type1 = as_factor(Building.Type1)
+        ) %>%
+        inner_join(state.region, by = "state") %>%
+        mutate(state = as_factor(state))
+
+write_rds(seda_db, "data_v2\\seda-db.rds")
+
+read_rds("data_v2\\seda-db.rds")
+```
+
+# Group by development regions
+
+```{r}
+
+tbl.buildings.region <-
+        state.region %>%
+        inner_join(tbl.buildings.bing, by = "state")
+
+tbl.buildings.region %>%
+        group_by(region) %>%
+        summarise(n = n()) %>%
+        ungroup() %>%
+        bind_cols(
+                lngRed = c(23.431189, 26.946191, 27.403131, 25.439181, 25.464054, 23.115908)
+        ) %>%
+        bind_cols(
+                latRed = c(42.184089, 42.360107, 43.477124, 43.179384, 41.846443, 43.604365)
+        ) %>%
+        write.csv("data_v2\\buildings-red.csv")
+
+read.csv("data_v2\\buildings-red.csv") %>% select(-X)
+```
+
+# Consolidated view of  Investments; Savings; Area
+
+```{r}
+tbl.buildings.region %>%
+        summarize(
+                Investment = sum(Investment, na.rm = TRUE)/1000000,
+                Savings = sum(Energy.Savings, na.rm = TRUE)/1000000,
+                Area = sum(Area, na.rm = TRUE)/1000000
+        ) %>%
+        ungroup() %>%
+        write.csv("data_v2\\buildings-aggreg.csv")
+
+read.csv("data_v2\\buildings-aggreg.csv") %>% select(-X)
+```
+

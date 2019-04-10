@@ -1,0 +1,217 @@
+---
+title: "Certified buildings BG Market - EDA"
+output: html_notebook
+---
+
+```{r setup}
+knitr::opts_chunk$set(message = FALSE, warning = FALSE)
+library(tidyverse)
+library(tidymodels)
+library(recipes)
+library(rvest)
+library(stringr)
+library(lubridate)
+library(revgeo)
+library(jsonlite)
+library(httr)
+library(kableExtra)
+library(FinCal)
+library(gridExtra)
+library(grid)
+```
+
+# Load and transform //a bit
+
+```{r}
+seda_db <- read_rds("data_v2\\seda-db.rds") %>%
+        mutate (
+                Repayment.Per = n.period(r = 0.05/12, pv = Investment, fv = 0, pmt = -BGN.Savings/12)/12
+        ) %>%
+        mutate(
+                Financing = if_else(Repayment.Per > 10, "Bankable", "Not Bankable")
+        ) %>%
+        mutate(Financing = as_factor(Financing)) %>%
+        mutate(Rating = as_factor(Rating)) %>%
+        mutate(Potential.Rating = as_factor(Potential.Rating)) %>%
+        mutate(Area.Class = case_when(
+                Area < 1000 ~ "less than 1 000",
+                Area >= 1000 && Area < 5000 ~ "between 1 000 and 5 000",
+                Area >=5000 ~ "more than 5 000"
+        )
+        ) %>%
+        mutate(Building.Type1 = case_when(
+                Building.Type1 == "Детско заведение (градини и ясли)" ~ "Kindergarten",
+                Building.Type1 == "Образователни (училища, колежи и университети)" ~ "Educational",
+                Building.Type1 == "Сгради за административно обслужване" ~ "Administrative",
+                Building.Type1 == "Транспорт (гари, пристанища и летища)" ~ "Transport",
+                Building.Type1 == "Библиотеки и читалища" ~ "Libraries",
+                Building.Type1 == "Магазини за продажба на дребно иедро (супермаркети и молове)" ~ "Supermarkets",
+                Building.Type1 == "Спортни зали и съоръжения" ~ "Sports",
+                Building.Type1 == "Хотели и ресторанти" ~ "Hotels and restaurants",
+                Building.Type1 == "Здравеопазване (болници, поликлиники и др.)" ~ "Hospitals",
+                Building.Type1 == "Театри,кина,опери,худож.галерии" ~ "Cinemas",
+                Building.Type1 == "Жилищна - етажна собственост (блок и/или кооперация) с ниско, средно и високо застрояване" ~ "Residential",
+                Building.Type1 == "Други, вкл. старч. домове, за сираци и изоставени деца, общ-тия, автосервизи" ~ "Other",
+                Building.Type1 == "Производствена сграда" ~ "Industry",
+                Building.Type1 == "Еднофамилни къщи" ~ "Houses",
+                Building.Type1 == "Сграда  обследвана от физ. лице" ~ "Self-audited"
+        )
+        ) %>%
+        mutate(
+                Area.Class = as_factor(Area.Class),
+                Building.Type1 = as_factor(Building.Type1)
+        ) %>%
+        mutate(
+                Financing = if_else(Repayment.Per < 10, "Bankable", "Not Bankable")
+        ) %>%
+        mutate(Financing = as_factor(Financing))
+
+seda_db        
+```
+
+# Group by development regions
+
+```{r}
+seda_db %>%
+        group_by(region) %>%
+        summarise(n = n())
+```
+
+# Investments; Savings; Area
+
+```{r}
+seda_db %>%
+        summarize(
+                Investment = sum(Investment, na.rm = TRUE)/1000000,
+                Savings = sum(Energy.Savings, na.rm = TRUE)/1000000,
+                Area = sum(Area, na.rm = TRUE)/1000000
+        )
+```
+
+# Repayment period histogram
+
+```{r message=FALSE, warning=FALSE}
+seda_db %>%
+        filter(Repayment.Per < 50) %>%
+        ggplot(aes(Repayment.Per)) +
+        geom_histogram() +
+        geom_vline(aes(xintercept = 10), color = "red", linetype = 1, size = 3) + 
+        labs(y = "Projects Count") + 
+        theme_bw()
+```
+
+# Repayment period table view 
+
+```{r message=FALSE, warning=FALSE}
+seda_db %>%
+        group_by(Financing) %>%
+        filter(!is.na(Financing)) %>%
+        summarise(
+                Projects = n(),
+                Invesments = sum(Investment)/1.96,
+                t.CO2 = round(sum(CO2.Savings, na.rm = TRUE))
+        ) %>%
+        kable(format.args = list(big.mark = " ")) %>%
+        kable_styling(full_width = F) %>%
+        row_spec(1, bold = T, color = "white", background = "red") %>%
+        row_spec(2, bold = T, color = "white", background = "green")
+```
+
+# Grant/Fin. instrument
+
+```{r}
+grant_help <- c(0.1, 0.20, 0.30, 0.40)
+
+notb <- seda_db %>%
+        filter(Financing == "Not Bankable") %>%
+        summarise(
+                NotBankable_Invesments = sum(Investment)/1.96,
+                NotBankable_BGN.Savings = sum(BGN.Savings)/1.96
+        )
+
+new_rep <- function(grant_perc, inv, saving){
+        inv = inv - grant_perc*inv
+        n.period(
+                r = 0.05/12, 
+                pv = inv, 
+                fv = 0, 
+                pmt = -saving/12
+        )/12
+}
+
+tibble(
+        Grant.Support = percent(grant_help, accuracy = 1),
+        Repayment.Per = map_dbl(grant_help, 
+                                new_rep,
+                                notb$NotBankable_Invesments, 
+                                notb$NotBankable_BGN.Savings
+        ) %>%
+                round(1)
+) %>%
+        kable() %>%
+        kable_styling(full_width = F) %>%
+        row_spec(3, bold = T, color = "white", background = "green")
+```
+
+## Investment ~ Saving by type
+
+```{r}
+seda_db %>%
+        select(Building.Type1, Investment, BGN.Savings, Area, Payback) %>%
+        filter(Payback < 10) %>%
+        
+        ggplot() +
+        geom_point(aes(x = BGN.Savings, y = Investment), alpha = 0.4) +
+        geom_smooth(method = lm, aes(x = BGN.Savings, y = Investment)) +
+        #geom_hline(aes(yintercept = 10), color = "red", linetype = 2) +
+        facet_wrap(~Building.Type1) +
+        scale_y_continuous(labels=function(x) format(x, big.mark = " ", scientific = FALSE)) +
+        scale_x_continuous(labels=function(x) format(x, big.mark = " ", scientific = TRUE)) +
+        labs(y = "BGN.Investment")
+```
+
+# Estimating: Type > Rating > Area and sorting 
+
+```{r}
+estim <- seda_db %>%
+        filter(
+                !is.na(Investment) | !is.na(BGN.Savings)
+        ) %>%
+        group_by(Building.Type1, Rating, Area.Class) %>%
+        nest(Investment, BGN.Savings) %>%
+        mutate(
+                fit = map(data, ~lm(BGN.Savings ~ Investment, data = .x)),
+                tidied = map(fit, tidy)
+        ) %>% 
+        unnest(tidied) %>%
+        filter(
+                p.value < 0.05,
+                term == "Investment"
+        ) %>%
+        arrange(
+                desc(estimate)
+        )
+
+gems <- estim %>%
+        select(-std.error, -term, -statistic, -p.value) %>%
+        mutate(Value = "gem") %>%
+        mutate(Estimate = round(estimate, 3)) %>%
+        select(-estimate) %>%
+        head(5)
+
+
+dregs <- estim %>%
+        select(-std.error, -term, -statistic, -p.value) %>%
+        mutate(Value = "dregs") %>%
+        mutate(Estimate = round(estimate, 3)) %>%
+        select(-estimate) %>%
+        tail(5)
+
+bind_rows(gems, dregs) %>%
+        kable() %>%
+        kable_styling(full_width = F) %>%
+        row_spec(1:5, bold = T, color = "white", background = "gold") %>%
+        row_spec(6:10, bold = T, color = "white", background = "grey")
+```
+
+

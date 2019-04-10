@@ -1,0 +1,65 @@
+---
+title: "5 044 CERTIFIED BUILDINGS"
+output: 
+  flexdashboard::flex_dashboard:
+    orientation: row
+---
+
+```{r setup, include=FALSE}
+library(tidyverse)
+library(flexdashboard)
+library(leaflet)
+```
+
+Row
+-----------------------------------------------------------------------
+
+### Distributed in 6 Regions of Economic Development
+
+```{r}
+red <- read.csv("data_v2\\buildings-red.csv") %>% select(-X)
+
+leaflet(red) %>% 
+        addTiles() %>% 
+        fitBounds(lng1 = 22.526146, lat1 = 44.249133, lng2 = 27.864496, lat2 = 41.326600) %>% 
+        addCircles(lng = ~lngRed, lat = ~latRed, weight = 1,
+                   radius = ~n*40, label = ~as.character(format(n, big.mark = " ")),
+                   fillColor = "#FF0000",
+                   color = "#000000",
+                   labelOptions = lapply(1:nrow(red), function(x) {
+                           labelOptions(noHide = TRUE, textOnly = TRUE, textsize = "30px")
+                   })
+        )
+```
+
+Row
+-----------------------------------------------------------------------
+
+### Required investments, million euros
+
+```{r}
+inv <- read.csv("data_v2\\buildings-aggreg.csv") %>% select(Investment) %>% mutate(Investment = Investment/1.95)
+valueBox(format(inv, digits = 3, big.mark = " "), 
+         icon = "fa-euro-sign",
+         color = "primary")
+
+```
+
+### Energy savings, GWh/year
+
+```{r}
+sav <- read.csv("data_v2\\buildings-aggreg.csv") %>% select(Savings)
+valueBox(format(sav, digits = 3, big.mark = " "), 
+         icon = "fa-bolt",
+         color = "green")
+```
+
+### Area, million sq. m.
+
+```{r}
+area <- read.csv("data_v2\\buildings-aggreg.csv") %>% select(Area)
+valueBox(format(area, digits = 3, big.mark = " "), 
+         icon = "fa-building",
+         color = "orange")
+```
+
