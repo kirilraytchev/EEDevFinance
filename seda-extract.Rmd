@@ -72,11 +72,12 @@ tbl.buildings <- tbl.buildings %>%
                 Rating = str_replace_all(Rating, "'", ""),
                 Potential.Rating = str_replace_all(Potential.Rating, "'", ""),
                 Building.Type1 = str_replace_all(Building.Type1, "'", "")
-        ) %>%
-        write_csv("data_v2\\buildings.csv")
+        ) 
+        #%>%
+        #write_csv("data_v2\\buildings.csv")
         
-
-read_csv("data_v2\\buildings.csv") %>% tail()
+tbl.buildings
+#read_csv("data_v2\\buildings.csv") %>% tail()
 
 ```
 
@@ -85,21 +86,22 @@ read_csv("data_v2\\buildings.csv") %>% tail()
 
 ```{r message=FALSE, warning=FALSE}
 
-tbl.buildings.bing <-
-        tbl.buildings %>%
-        map2_df(.x = as.list(.$Lng), 
-                .y = as.list(.$Lat), 
-                .f = revgeo, 
-                output = "frame", 
-                provider = "bing",
-                API = "...Your access code goes here..."
-        ) %>%
-        bind_cols(tbl.buildings
-        )
+# tbl.buildings.bing <-
+#         tbl.buildings %>%
+#         map2_df(.x = as.list(.$Lng), 
+#                 .y = as.list(.$Lat), 
+#                 .f = revgeo, 
+#                 output = "frame", 
+#                 provider = "bing",
+#                 API = "...Your access code goes here..."
+#         ) %>%
+#         bind_cols(tbl.buildings
+#         )
 
-write_csv(tbl.buildings.bing, "data_v2\\buildings-bing.csv")
+#write_csv(tbl.buildings.bing, "data_v2\\buildings-bing.csv")
 
-read_csv("data_v2\\buildings-bing.csv") %>% tail()
+tbl.buildings.bing <- read_csv("data_v2\\buildings-bing.csv")
+tbl.buildings.bing %>% tail()
 ```
 
 # Transform to SEDA db
@@ -122,9 +124,10 @@ seda_db <- read_csv("data_v2\\buildings-bing.csv") %>%
         inner_join(state.region, by = "state") %>%
         mutate(state = as_factor(state))
 
-write_rds(seda_db, "data_v2\\seda-db.rds")
+#write_rds(seda_db, "data_v2\\seda-db.rds")
 
-read_rds("data_v2\\seda-db.rds")
+seda_db
+#read_rds("data_v2\\seda-db.rds")
 ```
 
 # Group by development regions
@@ -144,10 +147,11 @@ tbl.buildings.region %>%
         ) %>%
         bind_cols(
                 latRed = c(42.184089, 42.360107, 43.477124, 43.179384, 41.846443, 43.604365)
-        ) %>%
-        write.csv("data_v2\\buildings-red.csv")
+        ) 
+        #%>%
+        #write.csv("data_v2\\buildings-red.csv")
 
-read.csv("data_v2\\buildings-red.csv") %>% select(-X)
+#read.csv("data_v2\\buildings-red.csv") %>% select(-X)
 ```
 
 # Consolidated view of  Investments; Savings; Area
@@ -159,9 +163,10 @@ tbl.buildings.region %>%
                 Savings = sum(Energy.Savings, na.rm = TRUE)/1000000,
                 Area = sum(Area, na.rm = TRUE)/1000000
         ) %>%
-        ungroup() %>%
-        write.csv("data_v2\\buildings-aggreg.csv")
+        ungroup() 
+        #%>%
+        #write.csv("data_v2\\buildings-aggreg.csv")
 
-read.csv("data_v2\\buildings-aggreg.csv") %>% select(-X)
+#read.csv("data_v2\\buildings-aggreg.csv") %>% select(-X)
 ```
 
